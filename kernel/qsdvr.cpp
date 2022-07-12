@@ -10,5 +10,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.doc() = "render kernel";
     m.def("add",
           &add,
-          "add");
+          "add",
+          py::arg("a"),
+          py::arg("b"));
 }
