@@ -1,9 +1,9 @@
 from torch import nn
 
-class VoxelRenderer(nn.Module):
+class RenderGrid(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self):
+    def forward(self,input):
         return
     
