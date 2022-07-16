@@ -51,6 +51,7 @@ class RayAggregate(autograd.Function):
 
     @staticmethod
     def backward(ctx: Any, gradOutput: Any):
+        ctx.rgbList
         return torch.Tensor()
 
 
@@ -116,7 +117,7 @@ class QuadricGrid(nn.Module):
         self.init_as_sphere()
         self.offset = nn.Parameter(self.offset)
 
-    def init_as_sphere(self, radius=0.8):
+    def init_as_sphere(self, radius=1.0):
         radius *= self.reso
         c = 1 - self.reso
         self.offset[0] = 2 * c
@@ -152,15 +153,13 @@ class RenderGrid(nn.Module):
         self.renderData = nn.Parameter(self.renderData)
         self.logisticCoef = logisticCoef
 
-    def forward(self, renderPointList: torch.Tensor,
-                renderIndexList: torch.Tensor, sdfPointList: torch.Tensor,
-                sdfIndexList: torch.Tensor, depthList: torch.Tensor,
-                viewDirList: torch.Tensor, rayList: torch.Tensor):
-        datalist = GridInterpolation.apply(self.renderData, renderPointList,
-                                           renderIndexList)
-        sdfList, normalList = self.quadricGrid.forward(renderPointList,
-                                                       renderIndexList,
-                                                       sdfPointList,
-                                                       sdfIndexList)
-        rgbList = Shader.apply(normalList, viewDirList, datalist)
-        return RayAggregate.apply(rgbList, sdfList, rayList, self.logisticCoef)
+    def forward(self, input):
+        datalist = GridInterpolation.apply(self.renderData,
+                                           input["renderPointList"],
+                                           input["renderIndexList"])
+        sdfList, normalList = self.quadricGrid.forward(
+            input["renderPointList"], input["renderIndexList"],
+            input["sdfPointList"], input["sdfIndexList"])
+        rgbList = Shader.apply(normalList, input["viewDirList"], datalist)
+        return RayAggregate.apply(rgbList, sdfList, input["rayList"],
+                                  self.logisticCoef)

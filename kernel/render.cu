@@ -172,7 +172,6 @@ __global__ void RayAggregateForwardKernel(vec3f *out, vec3f *rgbList, float *sdf
             T *= (1 - alpha);
         }
     }
-    __syncthreads();
     out[id] = color;
 }
 

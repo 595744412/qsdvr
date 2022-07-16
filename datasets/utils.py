@@ -14,9 +14,33 @@ class Camera(object):
         self.reso = reso
 
     def GetRayPoints(self):
-        return self.renderPointList, self.renderIndexList, self.sdfPointList, self.sdfIndexList, self.depthList, self.viewDirList, self.rayList
+        dataList = {}
+        dataList["rayList"] = self.rayList.cuda()
+        dataList["sdfPointList"] = torch.zeros((self.args.sdfCount, 3),
+                                               dtype=torch.float32,
+                                               device="cuda")
+        dataList["sdfIndexList"] = torch.zeros((self.args.sdfCount),
+                                               dtype=torch.int32,
+                                               device="cuda")
+        dataList["renderPointList"] = torch.zeros((self.args.renderCount, 3),
+                                                  dtype=torch.float32,
+                                                  device="cuda")
+        dataList["renderIndexList"] = torch.zeros((self.args.renderCount),
+                                                  dtype=torch.int32,
+                                                  device="cuda")
+        dataList["viewDirList"] = torch.zeros((self.args.renderCount, 3),
+                                              dtype=torch.float32,
+                                              device="cuda")
+        GenerateRayPoints(self.args, dataList["sdfPointList"],
+                          dataList["sdfIndexList"],
+                          dataList["renderPointList"],
+                          dataList["renderIndexList"],
+                          dataList["viewDirList"], dataList["rayList"],
+                          self.originList.cuda(), self.rangeList.cuda(),
+                          self.dirList.cuda(), self.interval, self.reso)
+        return dataList
 
-    def GenerateRayPoints(self):
+    def GenerateRayPoints(self, mask):
         self.rayList = torch.zeros((self.args.pixelCount, 4),
                                    dtype=torch.int32,
                                    device="cuda")
@@ -29,28 +53,9 @@ class Camera(object):
         self.dirList = torch.zeros((self.args.pixelCount, 3),
                                    dtype=torch.float32,
                                    device="cuda")
-        RayCut(self.args, self.rayList, self.originList, self.rangeList,
+        RayCut(self.args, mask, self.rayList, self.originList, self.rangeList,
                self.dirList, self.interval)
-        self.sdfPointList = torch.zeros((self.args.sdfCount, 3),
-                                        dtype=torch.float32,
-                                        device="cuda")
-        self.sdfIndexList = torch.zeros((self.args.sdfCount),
-                                        dtype=torch.int32,
-                                        device="cuda")
-        self.renderPointList = torch.zeros((self.args.renderCount, 3),
-                                           dtype=torch.float32,
-                                           device="cuda")
-        self.renderIndexList = torch.zeros((self.args.renderCount),
-                                           dtype=torch.int32,
-                                           device="cuda")
-        self.depthList = torch.zeros((self.args.renderCount),
-                                     dtype=torch.float32,
-                                     device="cuda")
-        self.viewDirList = torch.zeros((self.args.renderCount, 3),
-                                       dtype=torch.float32,
-                                       device="cuda")
-        GenerateRayPoints(self.args, self.sdfPointList, self.sdfIndexList,
-                          self.renderPointList, self.renderIndexList,
-                          self.depthList, self.viewDirList, self.rayList,
-                          self.originList, self.rangeList, self.dirList,
-                          self.interval, self.reso)
+        self.rayList = self.rayList.cpu()[mask, ...]
+        self.originList = self.originList.cpu()[mask, ...]
+        self.rangeList = self.rangeList.cpu()[mask, ...]
+        self.dirList = self.dirList.cpu()[mask, ...]

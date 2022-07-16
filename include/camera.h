@@ -22,7 +22,6 @@ struct PyCameraArgs
     unsigned int height;
     pybind11::array_t<float> rotation;
     pybind11::array_t<float> translation;
-    pybind11::array_t<float> scale;
     float fx;
     float fy;
     float cx;
@@ -46,8 +45,6 @@ inline CameraArgs ToCameraArgs(PyCameraArgs &pyargs)
     }
     temp = (float *)pyargs.translation.request().ptr;
     args.translation = {temp[0], temp[1], temp[2]};
-    temp = (float *)pyargs.scale.request().ptr;
-    args.scale = {temp[0], temp[1], temp[2]};
     args.fx = pyargs.fx;
     args.fy = pyargs.fy;
     args.cx = pyargs.cx;
@@ -63,6 +60,6 @@ struct Range
     float max;
 };
 
-void RayCut(PyCameraArgs &args, Tensor &rayList, Tensor &originList, Tensor &rangeList, Tensor &dirList, float interval);
+void RayCut(PyCameraArgs &args, Tensor &mask, Tensor &rayList, Tensor &originList, Tensor &rangeList, Tensor &dirList, float interval);
 
-void GenerateRayPoints(PyCameraArgs &args, Tensor &sdfPointList, Tensor &sdfIndexList, Tensor &renderPointList, Tensor &renderIndexList, Tensor &depthList, Tensor &viewDirList, Tensor &rayList, Tensor &originList, Tensor &rangeList, Tensor &dirList, float interval, unsigned int baseVolumeReso);
+void GenerateRayPoints(PyCameraArgs &args, Tensor &sdfPointList, Tensor &sdfIndexList, Tensor &renderPointList, Tensor &renderIndexList, Tensor &viewDirList, Tensor &rayList, Tensor &originList, Tensor &rangeList, Tensor &dirList, float interval, unsigned int baseVolumeReso);
