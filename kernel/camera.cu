@@ -43,7 +43,7 @@ __global__ void RayCutKernel(CameraArgs camera, vec3f *dirCuda, vec3f *originCud
     for (unsigned int j = 0; j < tempRayPointCount; j += 1)
     {
         vec3f p = nearPoint + dir * (float)j * interval;
-        if (p.x < 1.0f && p.x > -1.0f && p.y < 1.0f && p.y > -1.0f && p.z < 1.0f && p.z > -1.0f)
+        if (p.x < 0.9999f && p.x > -0.9999f && p.y < 0.9999f && p.y > -0.9999f && p.z < 0.9999f && p.z > -0.9999f)
         {
             if (rayPointCount == 0)
             {

@@ -22,12 +22,12 @@ optimizer = torch.optim.Adam(params=model.parameters(), lr=0.1)
 optimizer_torch = torch.optim.SGD(params=model_torch.parameters(), lr=0.1)
 torch.cuda.synchronize()
 dataset = NerfDataset("data/nerf_synthetic/chair", 1, 5, [1.0, 1.0, 1.0],
-                      [0, 0, 0], 0.1, grid_reso)
+                      [0, 0, 0], 0.04, grid_reso)
 print("begin")
 begin = time.time()
 for i in range(20):
-    optimizer.param_groups[0]["lr"] = 0.1 / ((i + 1) * (i + 1))
-    model.set_logisticCoef(0.1 * (i + 1) * (i + 1))
+    optimizer.param_groups[0]["lr"] = 0.01
+    model.set_logisticCoef(0.1 * 1.2**(i + 1))
     for input, gt in dataset:
         pred = model.forward(input)
         loss = Loss(pred, gt)

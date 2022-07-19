@@ -69,7 +69,6 @@ class NerfDataset(Dataset):
         self.cameras = []
         for c2w, img in tqdm(tzip(self.c2w, all_gt)):
             mask = img[..., 3] != 0
-            mask = torch.ones_like(mask, dtype=torch.bool)
             self.mask_index.append(mask.nonzero().numpy().reshape(-1))
             self.gt.append(img[mask, :3])
             camera = self.create_camera(c2w)

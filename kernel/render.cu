@@ -104,16 +104,16 @@ __global__ void GridInterpolationForwardKernel(float *out, float *dataGrid, vec3
     }
     const int nid = id % dataCount;
     const int pid = id / dataCount;
-    vec3f p = pointList[pid];
+    vec3f p = (pointList[pid] + 1.0f) / 2.0f;
     int i000 = indexList[pid] * dataCount + nid;
     int i010 = i000 + reso * dataCount;
     int i100 = i000 + reso * reso * dataCount;
     int i110 = i100 + reso * dataCount;
-    float a00 = Interpolation1D(dataGrid[i000], dataGrid[i000 + 1], p.x);
-    float a01 = Interpolation1D(dataGrid[i010], dataGrid[i010 + 1], p.x);
+    float a00 = Interpolation1D(dataGrid[i000], dataGrid[i000 + dataCount], p.x);
+    float a01 = Interpolation1D(dataGrid[i010], dataGrid[i010 + dataCount], p.x);
     float a0 = Interpolation1D(a00, a01, p.y);
-    float a10 = Interpolation1D(dataGrid[i100], dataGrid[i100 + 1], p.x);
-    float a11 = Interpolation1D(dataGrid[i110], dataGrid[i110 + 1], p.x);
+    float a10 = Interpolation1D(dataGrid[i100], dataGrid[i100 + dataCount], p.x);
+    float a11 = Interpolation1D(dataGrid[i110], dataGrid[i110 + dataCount], p.x);
     float a1 = Interpolation1D(a10, a11, p.y);
     out[id] = Interpolation1D(a0, a1, p.z);
 }
@@ -127,7 +127,7 @@ __global__ void GridInterpolationBackwardKernel(float *out, float *dataGrid, vec
     }
     const int nid = id % dataCount;
     const int pid = id / dataCount;
-    vec3f p = pointList[pid];
+    vec3f p = (pointList[pid] + 1.0f) / 2.0f;
     int i000 = indexList[pid] * dataCount + nid;
     int i010 = i000 + reso * dataCount;
     int i100 = i000 + reso * reso * dataCount;
@@ -142,13 +142,13 @@ __global__ void GridInterpolationBackwardKernel(float *out, float *dataGrid, vec
     float a11 = p.y * a1;
     float dx = 1 - p.x;
     atomicAdd(dataGrid + i000, dx * a00);
-    atomicAdd(dataGrid + i000 + 1, p.x * a00);
+    atomicAdd(dataGrid + i000 + dataCount, p.x * a00);
     atomicAdd(dataGrid + i010, dx * a01);
-    atomicAdd(dataGrid + i010 + 1, p.x * a01);
+    atomicAdd(dataGrid + i010 + dataCount, p.x * a01);
     atomicAdd(dataGrid + i100, dx * a10);
-    atomicAdd(dataGrid + i100 + 1, p.x * a10);
+    atomicAdd(dataGrid + i100 + dataCount, p.x * a10);
     atomicAdd(dataGrid + i110, dx * a11);
-    atomicAdd(dataGrid + i110 + 1, p.x * a11);
+    atomicAdd(dataGrid + i110 + dataCount, p.x * a11);
 }
 
 __global__ void ShaderForwardKernel(vec3f *out, vec3f *normalList, vec3f *viewDirList, float *dataList, vec3f *specularList, const unsigned int theardCount)

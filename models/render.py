@@ -212,12 +212,14 @@ class RenderGrid(nn.Module):
         super().__init__()
         self.quadricGrid = QuadricGrid(reso)
         self.reso = reso
-        self.renderData = torch.full((reso + 1, reso + 1, reso + 1, 32),
-                                     0.5,
-                                     dtype=torch.float32,
-                                     device="cuda")
+        self.renderData = torch.zeros((reso + 1, reso + 1, reso + 1, 32),
+                                      dtype=torch.float32,
+                                      device="cuda")
         self.logisticCoef = logisticCoef
         self.renderData[..., 31] = 1
+        self.renderData[..., 30] = 0.1
+        self.renderData[..., 27:30] = 1
+        self.renderData[..., 0:3] = 0.5
         self.renderData = nn.Parameter(self.renderData)
 
     def forward(self, input):
