@@ -9,7 +9,7 @@ __device__ __forceinline__ void TransCameraToWorld(CameraArgs &camera, vec3f &p)
     p.z = camera.rotation[6] * x + camera.rotation[7] * y + camera.rotation[8] * p.z + camera.translation.z;
 }
 
-__global__ void RayCutKernel(CameraArgs camera, vec3f *dirCuda, vec3f *originCuda, Range *rangeCuda, RayInfo *rayCuda, float interval, unsigned int pixelCount)
+__global__ void RayCutKernel(CameraArgs camera, vec3f *dirCuda, vec3f *originCuda, RayInfo *rayCuda, float interval, unsigned int pixelCount)
 {
     const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= pixelCount)
@@ -39,7 +39,7 @@ __global__ void RayCutKernel(CameraArgs camera, vec3f *dirCuda, vec3f *originCud
 
     unsigned int tempRayPointCount = end / interval;
     unsigned int rayPointCount = 0;
-    Range range = {0.0f, 0.0f};
+    vec3f newOri;
     for (unsigned int j = 0; j < tempRayPointCount; j += 1)
     {
         vec3f p = nearPoint + dir * (float)j * interval;
@@ -47,26 +47,17 @@ __global__ void RayCutKernel(CameraArgs camera, vec3f *dirCuda, vec3f *originCud
         {
             if (rayPointCount == 0)
             {
-                range.min = (float)j * interval;
+                newOri = p;
             }
-            range.max = (float)j * interval;
             rayPointCount += 1;
         }
     }
     dirCuda[id] = dir;
-    rangeCuda[id] = range;
-    originCuda[id] = nearPoint;
-    if (rayPointCount >= 2)
-    {
-        rayCuda[id].sdfCount = rayPointCount;
-    }
-    else
-    {
-        rayCuda[id].sdfCount = 0;
-    }
+    originCuda[id] = newOri;
+    rayCuda[id].sdfCount = rayPointCount;
 }
 
-__global__ void GenerateRayPointsKernel(vec3f *sdfPointList, vec3f *renderPointList, int *sdfIndexList, int *renderIndexList, vec3f *viewDirList, RayInfo *rayInfoListCudaHost, vec3f *dirCuda, vec3f *originCuda, Range *rangeCuda, unsigned int theardCount, unsigned int baseVolumeReso, float volumeOffset, unsigned int z_offset, float interval)
+__global__ void GenerateRayPointsKernel(vec3f *sdfPointList, vec3f *renderPointList, int *sdfIndexList, int *renderIndexList, vec3f *viewDirList, RayInfo *rayInfoListCudaHost, vec3f *dirCuda, vec3f *originCuda, unsigned int theardCount, unsigned int baseVolumeReso, float volumeOffset, unsigned int z_offset, float interval)
 {
     const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= theardCount)
@@ -75,8 +66,6 @@ __global__ void GenerateRayPointsKernel(vec3f *sdfPointList, vec3f *renderPointL
     }
     vec3f dir = dirCuda[id];
     vec3f ori = originCuda[id];
-    float minT = rangeCuda[id].min;
-    ori = ori + dir * minT;
     unsigned int sdfCount = rayInfoListCudaHost[id].sdfCount;
     unsigned int sdfOffset = rayInfoListCudaHost[id].sdfOffset;
     for (unsigned int j = 0; j < sdfCount; j += 1)
@@ -106,18 +95,17 @@ __global__ void GenerateRayPointsKernel(vec3f *sdfPointList, vec3f *renderPointL
     }
 }
 
-void RayCut(PyCameraArgs &args, Tensor &mask, Tensor &rayList, Tensor &originList, Tensor &rangeList, Tensor &dirList, float interval)
+void RayCut(PyCameraArgs &args, Tensor &mask, Tensor &rayList, Tensor &originList, Tensor &dirList, float interval)
 {
     RayInfo *rayCuda = (RayInfo *)rayList.data<int>();
     vec3f *originCuda = (vec3f *)originList.data<float>();
-    Range *rangeCuda = (Range *)rangeList.data<float>();
     vec3f *dirCuda = (vec3f *)dirList.data<float>();
     RayInfo *rayCPU = new RayInfo[args.pixelCount];
     bool *maskCPU = (bool *)mask.data<bool>();
 
     const unsigned int blockSize = commonBlockSize;
     const unsigned int gridSize = GetGridSize(blockSize, args.pixelCount);
-    RayCutKernel<<<gridSize, blockSize>>>(ToCameraArgs(args), dirCuda, originCuda, rangeCuda, rayCuda, interval, args.pixelCount);
+    RayCutKernel<<<gridSize, blockSize>>>(ToCameraArgs(args), dirCuda, originCuda, rayCuda, interval, args.pixelCount);
 
     cudaMemcpy(rayCPU, rayCuda, sizeof(RayInfo) * args.pixelCount, cudaMemcpyDeviceToHost);
     args.sdfCount = 0;
@@ -126,6 +114,10 @@ void RayCut(PyCameraArgs &args, Tensor &mask, Tensor &rayList, Tensor &originLis
     {
         if (maskCPU[i])
         {
+            if (rayCPU[i].sdfCount < 2)
+            {
+                rayCPU[i].sdfCount = 0;
+            }
             rayCPU[i].sdfOffset = args.sdfCount;
             args.sdfCount += rayCPU[i].sdfCount;
             rayCPU[i].renderOffset = args.renderCount;
@@ -137,11 +129,10 @@ void RayCut(PyCameraArgs &args, Tensor &mask, Tensor &rayList, Tensor &originLis
     delete[] rayCPU;
 }
 
-void GenerateRayPoints(PyCameraArgs &args, Tensor &sdfPointList, Tensor &sdfIndexList, Tensor &renderPointList, Tensor &renderIndexList, Tensor &viewDirList, Tensor &rayList, Tensor &originList, Tensor &rangeList, Tensor &dirList, float interval, unsigned int baseVolumeReso)
+void GenerateRayPoints(PyCameraArgs &args, Tensor &sdfPointList, Tensor &sdfIndexList, Tensor &renderPointList, Tensor &renderIndexList, Tensor &viewDirList, Tensor &rayList, Tensor &originList, Tensor &dirList, float interval, unsigned int baseVolumeReso)
 {
     RayInfo *rayCuda = (RayInfo *)rayList.data<int>();
     vec3f *originCuda = (vec3f *)originList.data<float>();
-    Range *rangeCuda = (Range *)rangeList.data<float>();
     vec3f *dirCuda = (vec3f *)dirList.data<float>();
     vec3f *sdfPointListCuda = (vec3f *)sdfPointList.data<float>();
     int *sdfIndexListCuda = (int *)sdfIndexList.data<int>();
@@ -152,5 +143,5 @@ void GenerateRayPoints(PyCameraArgs &args, Tensor &sdfPointList, Tensor &sdfInde
     const unsigned int theardCount = rayList.size(0);
     const unsigned int blockSize = commonBlockSize;
     const unsigned int gridSize = GetGridSize(blockSize, theardCount);
-    GenerateRayPointsKernel<<<gridSize, blockSize>>>(sdfPointListCuda, renderPointListCuda, sdfIndexListCuda, renderIndexListCuda, viewDirListCuda, rayCuda, dirCuda, originCuda, rangeCuda, theardCount, baseVolumeReso, baseVolumeReso / 2.0f, baseVolumeReso * baseVolumeReso, interval);
+    GenerateRayPointsKernel<<<gridSize, blockSize>>>(sdfPointListCuda, renderPointListCuda, sdfIndexListCuda, renderIndexListCuda, viewDirListCuda, rayCuda, dirCuda, originCuda, theardCount, baseVolumeReso, baseVolumeReso / 2.0f, baseVolumeReso * baseVolumeReso, interval);
 }

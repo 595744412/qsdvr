@@ -118,7 +118,40 @@ __global__ void GridInterpolationForwardKernel(float *out, float *dataGrid, vec3
     out[id] = Interpolation1D(a0, a1, p.z);
 }
 
-__global__ void ShaderForwardKernel(vec3f *out, vec3f *normalList, vec3f *viewDirList, float *dataList, const unsigned int theardCount)
+__global__ void GridInterpolationBackwardKernel(float *out, float *dataGrid, vec3f *pointList, int *indexList, const unsigned int theardCount, unsigned int reso)
+{
+    const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (id >= theardCount)
+    {
+        return;
+    }
+    const int nid = id % dataCount;
+    const int pid = id / dataCount;
+    vec3f p = pointList[pid];
+    int i000 = indexList[pid] * dataCount + nid;
+    int i010 = i000 + reso * dataCount;
+    int i100 = i000 + reso * reso * dataCount;
+    int i110 = i100 + reso * dataCount;
+    float outGrad = out[id];
+    float a0 = (1 - p.z) * outGrad;
+    float a1 = p.z * outGrad;
+    float dy = 1 - p.y;
+    float a00 = dy * a0;
+    float a01 = p.y * a0;
+    float a10 = dy * a1;
+    float a11 = p.y * a1;
+    float dx = 1 - p.x;
+    atomicAdd(dataGrid + i000, dx * a00);
+    atomicAdd(dataGrid + i000 + 1, p.x * a00);
+    atomicAdd(dataGrid + i010, dx * a01);
+    atomicAdd(dataGrid + i010 + 1, p.x * a01);
+    atomicAdd(dataGrid + i100, dx * a10);
+    atomicAdd(dataGrid + i100 + 1, p.x * a10);
+    atomicAdd(dataGrid + i110, dx * a11);
+    atomicAdd(dataGrid + i110 + 1, p.x * a11);
+}
+
+__global__ void ShaderForwardKernel(vec3f *out, vec3f *normalList, vec3f *viewDirList, float *dataList, vec3f *specularList, const unsigned int theardCount)
 {
     const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= theardCount)
@@ -139,11 +172,55 @@ __global__ void ShaderForwardKernel(vec3f *out, vec3f *normalList, vec3f *viewDi
     float ao = dataList[offset + 31];
     float vdotn = view.x * normal.x + view.y * normal.y + view.z * normal.z;
     vec3f reflect = view - normal * (2.0f * vdotn);
-    vec3f color = diffuse * (1.0f - metallic) + GetSH3Irradiance(reflect, specular) * (metallic + (1.0f - metallic) * 0.04f);
+    vec3f specularL = GetSH3Irradiance(reflect, specular);
+    vec3f color = diffuse * (1.0f - metallic) + specularL * metallic;
     out[id] = color * ao;
+    specularList[id] = specularL;
 }
 
-__global__ void RayAggregateForwardKernel(vec3f *out, vec3f *rgbList, float *sdfList, RayInfo *rayList, float logisticCoef, const unsigned int theardCount)
+__global__ void ShaderBackwardKernel(vec3f *out, vec3f *normalList, vec3f *viewDirList, float *dataList, vec3f *specularList, vec3f *normalGradList, float *dataGradList, const unsigned int theardCount)
+{
+    const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (id >= theardCount)
+    {
+        return;
+    }
+    vec3f normal = normalList[id];
+    vec3f view = viewDirList[id];
+    float dataGrad[32];
+    unsigned int offset = id * 32;
+    vec3f specular[9];
+#pragma unroll
+    for (int i = 0; i < 9; i += 1)
+    {
+        specular[i] = {dataList[offset + i], dataList[offset + i + 1], dataList[offset + i + 2]};
+    }
+    vec3f diffuse(dataList[offset + 27], dataList[offset + 28], dataList[offset + 29]);
+    float metallic = dataList[offset + 30];
+    float ao = dataList[offset + 31];
+    vec3f specularL = specularList[id];
+    vec3f outGrad = out[id];
+    float vdotn = view.x * normal.x + view.y * normal.y + view.z * normal.z;
+    vec3f reflect = view - normal * (2.0f * vdotn);
+    vec3f color = diffuse * (1.0f - metallic) + specularL * metallic;
+
+    dataGrad[31] = (outGrad * color).Sum();
+    outGrad = outGrad * ao;
+    dataGrad[30] = (outGrad * (specularL - diffuse)).Sum();
+    *(vec3f *)(dataGrad + 27) = outGrad * (1.0f - metallic);
+    vec3f reflectGrad;
+    GetSH3IrradianceBackward(outGrad * metallic, reflect, specular, reflectGrad, (vec3f *)dataGrad);
+    float xx = normal.x * view.x;
+    float yy = normal.y * view.y;
+    float zz = normal.z * view.z;
+    normalGradList[id] = vec3f(
+        -2.0f * (reflectGrad.x * (2 * xx + yy + zz) + view.x * (reflectGrad.y * normal.y + reflectGrad.z * normal.z)),
+        -2.0f * (reflectGrad.y * (xx + 2 * yy + zz) + view.y * (reflectGrad.x * normal.x + reflectGrad.z * normal.z)),
+        -2.0f * (reflectGrad.z * (xx + yy + 2 * zz) + view.z * (reflectGrad.x * normal.x + reflectGrad.y * normal.y)));
+    memcpy(dataGradList + offset, dataGrad, 32 * sizeof(float));
+}
+
+__global__ void RayAggregateForwardKernel(vec3f *out, vec3f *rgbList, float *sdfList, RayInfo *rayList, float *alphaList, float *TList, float logisticCoef, const unsigned int theardCount)
 {
     const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= theardCount)
@@ -151,8 +228,6 @@ __global__ void RayAggregateForwardKernel(vec3f *out, vec3f *rgbList, float *sdf
         return;
     }
     RayInfo info = rayList[id];
-    const unsigned int sdfOffset = info.sdfOffset;
-    const unsigned int renderOffset = info.renderOffset;
     vec3f color;
     if (info.sdfCount == 0)
     {
@@ -161,18 +236,82 @@ __global__ void RayAggregateForwardKernel(vec3f *out, vec3f *rgbList, float *sdf
     else
     {
 
-        float exp_SDF_i = expf(-logisticCoef * sdfList[sdfOffset]);
+        float exp_SDF_i = expf(-logisticCoef * sdfList[info.sdfOffset]);
         float T = 1.0f;
-        for (unsigned int i = 1; i < info.sdfCount; i += 1)
+        for (unsigned int i = 0; i < info.renderCount; i += 1)
         {
-            float exp_SDF_i_1 = expf(-logisticCoef * sdfList[sdfOffset + i]);
+            float exp_SDF_i_1 = expf(-logisticCoef * sdfList[info.sdfOffset + i + 1]);
             float alpha = fmaxf((exp_SDF_i_1 - exp_SDF_i) / (1.0f + exp_SDF_i_1), 0.0f);
-            color = color + rgbList[renderOffset + i] * alpha * T;
+            alphaList[info.renderOffset + i] = alpha;
+            TList[info.renderOffset + i] = T;
+            color = color + rgbList[info.renderOffset + i] * alpha * T;
             exp_SDF_i = exp_SDF_i_1;
             T *= (1 - alpha);
         }
     }
     out[id] = color;
+}
+
+__global__ void RayAggregateBackwardKernel(vec3f *outGrad, vec3f *rgbList, float *sdfList, RayInfo *rayList, float *alphaList, float *TList, vec3f *rgbGradList, float *sdfGradList, float logisticCoef, const unsigned int theardCount)
+{
+    const unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (id >= theardCount)
+    {
+        return;
+    }
+    RayInfo info = rayList[id];
+    vec3f grad = outGrad[id];
+    if (info.sdfCount != 0)
+    {
+        float T = TList[info.renderOffset + info.sdfCount - 2];
+        float a = alphaList[info.renderOffset + info.sdfCount - 2];
+        vec3f c = rgbList[info.renderOffset + info.sdfCount - 2];
+        float exp_SDF_i = expf(-logisticCoef * sdfList[info.sdfOffset + info.sdfCount - 1]);
+        float exp_SDF_i_1 = expf(-logisticCoef * sdfList[info.sdfOffset + info.sdfCount - 2]);
+        float exp_SDF_i_inverse = 1.0f / (1.0f + exp_SDF_i);
+        float da_1 = -logisticCoef * exp_SDF_i * (1.0f + exp_SDF_i_1) * exp_SDF_i_inverse * exp_SDF_i_inverse;
+        float da = logisticCoef * exp_SDF_i_1 * exp_SDF_i_inverse;
+        if (a == 0.0f)
+        {
+            da_1 = 0.0f;
+            da = 0.0f;
+        }
+        vec3f Tc = c * T;
+        vec3f Tac_1 = Tc * a;
+        vec3f Tc_1;
+        float a_1;
+        vec3f Tac(0.0f, 0.0f, 0.0f);
+        sdfGradList[info.sdfOffset + info.sdfCount - 1] = (grad * Tc * da_1).Sum();
+        rgbGradList[info.renderOffset + info.sdfCount - 2] = grad * T * a;
+        exp_SDF_i = exp_SDF_i_1;
+        for (int i = info.sdfCount - 3; i >= 0; i -= 1)
+        {
+            T = TList[info.renderOffset + i];
+            a_1 = alphaList[info.renderOffset + i];
+            c = rgbList[info.renderOffset + i];
+            exp_SDF_i_1 = expf(-logisticCoef * sdfList[info.sdfOffset + i]);
+            exp_SDF_i_inverse = 1.0f / (1.0f + exp_SDF_i);
+            da_1 = -logisticCoef * exp_SDF_i * (1.0f + exp_SDF_i_1) * exp_SDF_i_inverse * exp_SDF_i_inverse;
+            if (a_1 == 0.0f)
+            {
+                da_1 = 0.0f;
+            }
+            Tc_1 = c * T;
+            sdfGradList[info.sdfOffset + i + 1] = (grad * ((Tac_1 / (a_1 - 1) + Tc_1) * da_1 + (Tac / (a - 1) + Tc) * da)).Sum();
+            rgbGradList[info.renderOffset + i] = grad * T * a_1;
+            Tac = Tac_1;
+            Tac_1 = Tac_1 + Tc_1 * a_1;
+            a = a_1;
+            Tc = Tc_1;
+            da = logisticCoef * exp_SDF_i_1 * exp_SDF_i_inverse;
+            if (a_1 == 0.0f)
+            {
+                da = 0.0f;
+            }
+            exp_SDF_i = exp_SDF_i_1;
+        }
+        sdfGradList[info.sdfOffset] = (grad * (Tac / (a - 1) + Tc) * da).Sum();
+    }
 }
 
 void GridInterpolationForward(Tensor &dataGrid, Tensor &pointList, Tensor &indexList, Tensor &out, unsigned int reso)
@@ -183,18 +322,42 @@ void GridInterpolationForward(Tensor &dataGrid, Tensor &pointList, Tensor &index
     GridInterpolationForwardKernel<<<gridSize, blockSize>>>(out.data<float>(), dataGrid.data<float>(), (vec3f *)pointList.data<float>(), indexList.data<int>(), theardCount, reso);
 }
 
-void ShaderForward(Tensor &out, Tensor &normalList, Tensor &viewDirList, Tensor &dataList)
+void GridInterpolationBackward(Tensor &dataGrid, Tensor &pointList, Tensor &indexList, Tensor &out, unsigned int reso)
+{
+    const unsigned int theardCount = dataCount * pointList.size(0);
+    const unsigned int blockSize = commonBlockSize;
+    const unsigned int gridSize = GetGridSize(blockSize, theardCount);
+    GridInterpolationBackwardKernel<<<gridSize, blockSize>>>(out.data<float>(), dataGrid.data<float>(), (vec3f *)pointList.data<float>(), indexList.data<int>(), theardCount, reso);
+}
+
+void ShaderForward(Tensor &out, Tensor &normalList, Tensor &viewDirList, Tensor &dataList, Tensor &specularList)
 {
     const unsigned int theardCount = normalList.size(0);
     const unsigned int blockSize = commonBlockSize;
     const unsigned int gridSize = GetGridSize(blockSize, theardCount);
-    ShaderForwardKernel<<<gridSize, blockSize>>>((vec3f *)out.data<float>(), (vec3f *)normalList.data<float>(), (vec3f *)viewDirList.data<float>(), dataList.data<float>(), theardCount);
+    ShaderForwardKernel<<<gridSize, blockSize>>>((vec3f *)out.data<float>(), (vec3f *)normalList.data<float>(), (vec3f *)viewDirList.data<float>(), dataList.data<float>(), (vec3f *)specularList.data<float>(), theardCount);
 }
 
-void RayAggregateForward(Tensor &out, Tensor &rgbList, Tensor &sdfList, Tensor &rayList, float logisticCoef)
+void ShaderBackward(Tensor &out, Tensor &normalList, Tensor &viewDirList, Tensor &dataList, Tensor &specularList, Tensor &normalGradList, Tensor &dataGradList)
+{
+    const unsigned int theardCount = normalList.size(0);
+    const unsigned int blockSize = commonBlockSize;
+    const unsigned int gridSize = GetGridSize(blockSize, theardCount);
+    ShaderBackwardKernel<<<gridSize, blockSize>>>((vec3f *)out.data<float>(), (vec3f *)normalList.data<float>(), (vec3f *)viewDirList.data<float>(), dataList.data<float>(), (vec3f *)specularList.data<float>(), (vec3f *)normalGradList.data<float>(), dataGradList.data<float>(), theardCount);
+}
+
+void RayAggregateForward(Tensor &out, Tensor &rgbList, Tensor &sdfList, Tensor &rayList, Tensor &alphaList, Tensor &TList, float logisticCoef)
 {
     const unsigned int theardCount = rayList.size(0);
     const unsigned int blockSize = commonBlockSize;
     const unsigned int gridSize = GetGridSize(blockSize, theardCount);
-    RayAggregateForwardKernel<<<gridSize, blockSize>>>((vec3f *)out.data<float>(), (vec3f *)rgbList.data<float>(), sdfList.data<float>(), (RayInfo *)rayList.data<int>(), logisticCoef, theardCount);
+    RayAggregateForwardKernel<<<gridSize, blockSize>>>((vec3f *)out.data<float>(), (vec3f *)rgbList.data<float>(), sdfList.data<float>(), (RayInfo *)rayList.data<int>(), alphaList.data<float>(), TList.data<float>(), logisticCoef, theardCount);
+}
+
+void RayAggregateBackward(Tensor &outgrad, Tensor &rgbList, Tensor &sdfList, Tensor &rayList, Tensor &alphaList, Tensor &TList, Tensor &rgbGradList, Tensor &sdfGradList, float logisticCoef)
+{
+    const unsigned int theardCount = rayList.size(0);
+    const unsigned int blockSize = commonBlockSize;
+    const unsigned int gridSize = GetGridSize(blockSize, theardCount);
+    RayAggregateBackwardKernel<<<gridSize, blockSize>>>((vec3f *)outgrad.data<float>(), (vec3f *)rgbList.data<float>(), sdfList.data<float>(), (RayInfo *)rayList.data<int>(), alphaList.data<float>(), TList.data<float>(), (vec3f *)rgbGradList.data<float>(), sdfGradList.data<float>(), logisticCoef, theardCount);
 }

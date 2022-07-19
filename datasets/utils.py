@@ -34,9 +34,8 @@ class Camera(object):
         GenerateRayPoints(self.args, dataList["sdfPointList"],
                           dataList["sdfIndexList"],
                           dataList["renderPointList"],
-                          dataList["renderIndexList"],
-                          dataList["viewDirList"], dataList["rayList"],
-                          self.originList.cuda(), self.rangeList.cuda(),
+                          dataList["renderIndexList"], dataList["viewDirList"],
+                          dataList["rayList"], self.originList.cuda(),
                           self.dirList.cuda(), self.interval, self.reso)
         return dataList
 
@@ -47,15 +46,11 @@ class Camera(object):
         self.originList = torch.zeros((self.args.pixelCount, 3),
                                       dtype=torch.float32,
                                       device="cuda")
-        self.rangeList = torch.zeros((self.args.pixelCount, 2),
-                                     dtype=torch.float32,
-                                     device="cuda")
         self.dirList = torch.zeros((self.args.pixelCount, 3),
                                    dtype=torch.float32,
                                    device="cuda")
-        RayCut(self.args, mask, self.rayList, self.originList, self.rangeList,
-               self.dirList, self.interval)
+        RayCut(self.args, mask, self.rayList, self.originList, self.dirList,
+               self.interval)
         self.rayList = self.rayList.cpu()[mask, ...]
         self.originList = self.originList.cpu()[mask, ...]
-        self.rangeList = self.rangeList.cpu()[mask, ...]
         self.dirList = self.dirList.cpu()[mask, ...]

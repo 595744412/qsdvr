@@ -7,16 +7,28 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
       m.doc() = "render kernel";
       m.def("GridInterpolationForward",
             &GridInterpolationForward);
+      m.def("GridInterpolationBackward",
+            &GridInterpolationBackward);
       m.def("LayerToGridForward",
             &LayerToGridForward);
+      m.def("LayerToGridBackward",
+            &LayerToGridBackward);
       m.def("SampleSDFForward",
             &SampleSDFForward);
+      m.def("SampleSDFBackward",
+            &SampleSDFBackward);
       m.def("SampleNormalForward",
             &SampleNormalForward);
+      m.def("SampleNormalBackward",
+            &SampleNormalBackward);
       m.def("ShaderForward",
             &ShaderForward);
+      m.def("ShaderBackward",
+            &ShaderBackward);
       m.def("RayAggregateForward",
             &RayAggregateForward);
+      m.def("RayAggregateBackward",
+            &RayAggregateBackward);
       m.def("RayCut",
             &RayCut);
       m.def("GenerateRayPoints",

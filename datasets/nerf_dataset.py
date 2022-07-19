@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
+from tqdm.contrib import tzip
 import imageio
 from datasets.utils import Camera
 from qsdvr import CameraArgs
@@ -66,8 +67,9 @@ class NerfDataset(Dataset):
         self.gt = []
         self.mask_index = []
         self.cameras = []
-        for c2w, img in tqdm(zip(self.c2w, all_gt)):
+        for c2w, img in tqdm(tzip(self.c2w, all_gt)):
             mask = img[..., 3] != 0
+            mask = torch.ones_like(mask, dtype=torch.bool)
             self.mask_index.append(mask.nonzero().numpy().reshape(-1))
             self.gt.append(img[mask, :3])
             camera = self.create_camera(c2w)
