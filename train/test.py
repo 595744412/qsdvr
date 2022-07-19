@@ -15,28 +15,35 @@ from qsdvr import CameraArgs
 from datasets import NerfDataset
 
 grid_reso = 128
-model = RenderGrid(grid_reso, 0.01)
+model = RenderGrid(grid_reso, 0.1)
 model_torch = RenderGridTorch(grid_reso, 1)
 Loss = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(params=model.parameters(), lr=0.2)
+optimizer = torch.optim.Adam(params=model.parameters(), lr=0.1)
 optimizer_torch = torch.optim.SGD(params=model_torch.parameters(), lr=0.1)
 torch.cuda.synchronize()
-dataset = NerfDataset("data/nerf_synthetic/chair", 1, 5, [0.7, 0.7, 0.7],
+dataset = NerfDataset("data/nerf_synthetic/chair", 1, 5, [1.0, 1.0, 1.0],
                       [0, 0, 0], 0.1, grid_reso)
 print("begin")
 begin = time.time()
-for i in range(300):
-    input, gt = dataset[i % 100]
-    pred = model.forward(input)
-    loss = Loss(pred, gt)
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-    torch.cuda.empty_cache()
-    print("loss:", loss.item())
+for i in range(20):
+    optimizer.param_groups[0]["lr"] = 0.1 / ((i + 1) * (i + 1))
+    model.set_logisticCoef(0.1 * (i + 1) * (i + 1))
+    for input, gt in dataset:
+        pred = model.forward(input)
+        loss = Loss(pred, gt)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        torch.cuda.empty_cache()
+        print("loss:", loss.item())
+with torch.no_grad():
+    for i in range(100):
+        input, gt = dataset[i]
+        img = dataset.get_whole_image(
+            model.forward(input).cpu().detach().numpy(), i)
+        imageio.imwrite("output/render_" + str(i) + ".png",
+                        (img * 255).clip(0, 255).astype(np.uint8))
+        torch.cuda.empty_cache()
+
 end = time.time()
-print(str(100 / (end - begin)) + "fps")
-img = dataset.get_whole_image(
-    model.forward(dataset[0][0]).cpu().detach().numpy(), 0)
-imageio.imwrite("output/render_" + str(0) + ".png",
-                (img * 255).clip(0, 255).astype(np.uint8))
+print(str(end - begin) + "s")

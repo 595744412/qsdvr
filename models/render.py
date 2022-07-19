@@ -184,13 +184,12 @@ class QuadricGrid(nn.Module):
         self.init_as_sphere()
         self.offset = nn.Parameter(self.offset)
 
-    def init_as_sphere(self, radius=0.1):
-        radius *= self.reso
+    def init_as_sphere(self, radius=1.0):
         c = -self.reso
         self.offset[0] = -2 * c
         self.offset[1] = -2 * c
         self.offset[2] = -2 * c
-        self.offset[3] = math.sqrt(3 * c * c) - radius
+        self.offset[3] = math.sqrt(3 * c * c)
 
     def forward(
         self,
@@ -213,14 +212,12 @@ class RenderGrid(nn.Module):
         super().__init__()
         self.quadricGrid = QuadricGrid(reso)
         self.reso = reso
-        self.renderData = torch.zeros((reso + 1, reso + 1, reso + 1, 32),
-                                      dtype=torch.float32,
-                                      device="cuda")
+        self.renderData = torch.full((reso + 1, reso + 1, reso + 1, 32),
+                                     0.5,
+                                     dtype=torch.float32,
+                                     device="cuda")
         self.logisticCoef = logisticCoef
         self.renderData[..., 31] = 1
-        self.renderData[..., 30] = 0.1
-        self.renderData[..., 27:30] = 0.5
-        self.renderData[..., 0:3] = 0.5
         self.renderData = nn.Parameter(self.renderData)
 
     def forward(self, input):
@@ -233,3 +230,6 @@ class RenderGrid(nn.Module):
         rgbList = Shader.apply(normalList, input["viewDirList"], datalist)
         return RayAggregate.apply(rgbList, sdfList, input["rayList"],
                                   self.logisticCoef)
+
+    def set_logisticCoef(self, logisticCoef):
+        self.logisticCoef = logisticCoef
