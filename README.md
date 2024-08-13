@@ -1,11 +1,15 @@
 # QSDVR
 A Differentiable volume renderer base on quadric surface grid.
 
+## Data
+Download nerf_synthetic dataset from this [repo](https://github.com/bmild/nerf). 
+
 ## Prerequisites
 
 * Cuda 11.2+
 * Python 3.8+
 * Pip 10+
+* Pytorch(Cuda) 1.12+
 
 ## Setup
 First make sure all the Prerequisites are installed in your operating system.
@@ -22,5 +26,5 @@ pip install .
 To render the init model, run
 
 ```bash
-python3 ./train/test.py
+python3 ./test.py --data_path <path to dataset>
 ```

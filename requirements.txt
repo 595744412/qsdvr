@@ -1,5 +1,7 @@
-numpy==1.22.0
-opencv_python==4.5.5.62
-qsdvr==0.0.0
-setuptools==58.1.0
-torch==1.12.0+cu113
+numpy
+opencv_python
+setuptools
+opencv_python
+tqdm
+imageio
+argparse
